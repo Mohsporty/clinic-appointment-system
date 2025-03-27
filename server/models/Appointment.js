@@ -51,6 +51,26 @@ const appointmentSchema = mongoose.Schema(
     prescription: {
       type: String,
     },
+    // حقول جديدة لطلبات التعديل
+    editRequest: {
+      newDate: {
+        type: Date,
+      },
+      newTime: {
+        type: String,
+      },
+      reason: {
+        type: String,
+      },
+      requestedAt: {
+        type: Date,
+      }
+    },
+    editRequestStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected', null],
+      default: null
+    }
   },
   {
     timestamps: true,

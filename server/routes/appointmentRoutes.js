@@ -10,7 +10,10 @@ const {
   getAppointmentById,
   updateAppointment,
   cancelAppointment,
-  getPatientAppointments
+  getPatientAppointments,
+  requestAppointmentEdit,
+  approveEditRequest,
+  rejectEditRequest
 } = require('../controllers/appointmentController');
 
 // @desc    إنشاء موعد جديد
@@ -43,10 +46,25 @@ router.get('/patient/:id', protect, admin, getPatientAppointments);
 // @access  Private
 router.get('/:id', protect, getAppointmentById);
 
-// @desc    تحديث موعد
+// @desc    تحديث موعد (للمدير فقط)
 // @route   PUT /api/appointments/:id
+// @access  Private/Admin
+router.put('/:id', protect, admin, updateAppointment);
+
+// @desc    طلب تعديل موعد (للمريض)
+// @route   POST /api/appointments/:id/edit-request
 // @access  Private
-router.put('/:id', protect, updateAppointment);
+router.post('/:id/edit-request', protect, requestAppointmentEdit);
+
+// @desc    الموافقة على طلب تعديل الموعد (للمدير فقط)
+// @route   PUT /api/appointments/:id/approve-edit
+// @access  Private/Admin
+router.put('/:id/approve-edit', protect, admin, approveEditRequest);
+
+// @desc    رفض طلب تعديل الموعد (للمدير فقط)
+// @route   PUT /api/appointments/:id/reject-edit
+// @access  Private/Admin
+router.put('/:id/reject-edit', protect, admin, rejectEditRequest);
 
 // @desc    إلغاء موعد
 // @route   PUT /api/appointments/:id/cancel
