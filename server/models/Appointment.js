@@ -37,13 +37,23 @@ const appointmentSchema = mongoose.Schema(
     paymentMethod: {
       type: String,
       required: true,
-      enum: ['cash', 'creditCard', 'insurance'],
+      enum: ['cash', 'creditCard', 'insurance', 'bankTransfer', 'other'],
     },
     paymentStatus: {
       type: String,
       required: true,
       default: 'pending',
-      enum: ['pending', 'paid', 'refunded'],
+      enum: ['pending', 'paid', 'refunded', 'partially_paid'],
+    },
+    paymentAmount: {
+      type: Number,
+      default: 0
+    },
+    paymentDate: {
+      type: Date
+    },
+    paymentReference: {
+      type: String
     },
     medicalReport: {
       type: String,
