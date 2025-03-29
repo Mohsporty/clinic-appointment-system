@@ -1,0 +1,160 @@
+/* client/src/rtl.css - ملف محسن لدعم RTL */
+body {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Tajawal', 'Roboto', sans-serif;
+  }
+  
+  /* إصلاح حاويات flex */
+  .MuiGrid-container, 
+  .MuiBox-root,
+  .MuiToolbar-root,
+  .MuiList-root,
+  .MuiListItem-root,
+  .MuiTableRow-root,
+  .MuiStack-root {
+    direction: rtl;
+  }
+  
+  /* إصلاح أيقونات الإدخال */
+  .MuiInputAdornment-root.MuiInputAdornment-positionStart {
+    margin-left: 8px;
+    margin-right: 0;
+  }
+  
+  .MuiInputAdornment-root.MuiInputAdornment-positionEnd {
+    margin-right: 8px;
+    margin-left: 0;
+  }
+  
+  /* إصلاح أيقونات الأزرار */
+  .MuiButton-startIcon {
+    margin-left: 8px;
+    margin-right: -4px;
+  }
+  
+  .MuiButton-endIcon {
+    margin-right: 8px;
+    margin-left: -4px;
+  }
+  
+  /* إصلاح القوائم المنسدلة */
+  .MuiMenu-paper {
+    direction: rtl;
+    text-align: right;
+  }
+  
+  /* إصلاح النوافذ الحوارية */
+  .MuiDialog-paper {
+    direction: rtl;
+    text-align: right;
+  }
+  
+  /* إصلاح مربعات النص */
+  .MuiInputBase-input {
+    text-align: right !important;
+  }
+  
+  /* إصلاح خلايا الجدول */
+  .MuiTableCell-root {
+    text-align: right !important;
+  }
+  
+  /* إصلاح عرض التنبيهات */
+  .MuiAlert-root {
+    text-align: right;
+  }
+  
+  .MuiAlert-icon {
+    margin-right: 0;
+    margin-left: 12px;
+  }
+  
+  /* إصلاح Chips */
+  .MuiChip-icon {
+    margin-left: 5px;
+    margin-right: -6px;
+  }
+  
+  .MuiChip-deleteIcon {
+    margin-right: 5px;
+    margin-left: -6px;
+  }
+  
+  /* إصلاح Form Control */
+  .MuiFormControl-root {
+    text-align: right;
+  }
+  
+  .MuiFormControlLabel-root {
+    margin-left: 0;
+    margin-right: -11px;
+  }
+  
+  /* إصلاحات Select */
+  .MuiSelect-select {
+    padding-right: 16px !important;
+    padding-left: 32px !important;
+  }
+  
+  .MuiSelect-icon {
+    right: auto !important;
+    left: 7px !important;
+  }
+  
+  /* إصلاح التوجيه للقائمة الجانبية */
+  .MuiDrawer-root .MuiDrawer-paper {
+    direction: rtl;
+  }
+  
+  /* إصلاح المودال */
+  .MuiModal-root {
+    direction: rtl;
+  }
+  
+  /* إصلاح أيقونات القوائم */
+  .MuiListItemIcon-root {
+    min-width: 36px;
+    margin-right: 0;
+    margin-left: 8px;
+  }
+  
+  /* دعم الخطوط */
+  @font-face {
+    font-family: 'Tajawal';
+    font-style: normal;
+    font-weight: 400;
+    src: url('@fontsource/tajawal/files/tajawal-arabic-400-normal.woff2') format('woff2');
+    unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FEFF;
+  }
+  
+  @font-face {
+    font-family: 'Tajawal';
+    font-style: normal;
+    font-weight: 500;
+    src: url('@fontsource/tajawal/files/tajawal-arabic-500-normal.woff2') format('woff2');
+    unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FEFF;
+  }
+  
+  @font-face {
+    font-family: 'Tajawal';
+    font-style: normal;
+    font-weight: 700;
+    src: url('@fontsource/tajawal/files/tajawal-arabic-700-normal.woff2') format('woff2');
+    unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FEFF;
+  }
+  
+  /* تحسينات للأجهزة المحمولة */
+  @media (max-width: 600px) {
+    .MuiGrid-root.MuiGrid-container {
+      flex-direction: column;
+    }
+    
+    .mobile-rtl-fixes .MuiToolbar-root {
+      justify-content: space-between;
+    }
+    
+    .mobile-rtl-fixes .MuiTableCell-root {
+      padding: 8px;
+    }
+  }
