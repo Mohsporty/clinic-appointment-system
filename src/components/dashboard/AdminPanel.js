@@ -1,5 +1,5 @@
 // client/src/components/dashboard/AdminPanel.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { format, parseISO, isToday, isTomorrow, addDays } from 'date-fns';
 import { ar } from 'date-fns/locale';
@@ -37,7 +37,8 @@ import {
   FormHelperText,
   Tooltip,
   InputAdornment,
-  Collapse
+  Collapse,
+  Snackbar
 } from '@mui/material';
 import {
   SupervisorAccount as AdminIcon,
@@ -64,7 +65,7 @@ import {
   MedicalServices as MedicalIcon,
   MonetizationOn as MoneyIcon,
   Person as PersonIcon,
-  ChangeCircle as ChangeCircleIcon  // إضافة أيقونة جديدة لطلبات التعديل
+  ChangeCircle as ChangeCircleIcon
 } from '@mui/icons-material';
 
 const AdminPanel = () => {
@@ -75,6 +76,7 @@ const AdminPanel = () => {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [stats, setStats] = useState({
     totalPatients: 0,
     newPatients: 0,
@@ -84,7 +86,7 @@ const AdminPanel = () => {
     totalDocuments: 0,
     pendingPayments: 0,
     todayAppointments: 0,
-    pendingEditRequests: 0  // إضافة إحصائية لطلبات التعديل المعلقة
+    pendingEditRequests: 0
   });
   
   // حالة تعديل الموعد
@@ -95,6 +97,8 @@ const AdminPanel = () => {
   const [medicalReport, setMedicalReport] = useState('');
   const [prescription, setPrescription] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
   
   // حالة طلبات التعديل
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
@@ -111,24 +115,26 @@ const AdminPanel = () => {
   const [dateFilter, setDateFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState('all');
-  const [editRequestFilter, setEditRequestFilter] = useState('all');  // إضافة فلتر لطلبات التعديل
+  const [editRequestFilter, setEditRequestFilter] = useState('all');
   const [filterOpen, setFilterOpen] = useState(false);
   
   const userInfo = JSON.parse(localStorage.getItem('userInfo'));
   
-  useEffect(() => {
-    fetchData();
-  }, []);
+  // الحصول على تكوين التوثيق
+  const getAuthConfig = useCallback(() => {
+    return {
+      headers: {
+        Authorization: `Bearer ${userInfo.token}`
+      }
+    };
+  }, [userInfo.token]);
   
-  const fetchData = async () => {
+  // جلب البيانات الأساسية
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       
-      const config = {
-        headers: {
-          Authorization: `Bearer ${userInfo.token}`
-        }
-      };
+      const config = getAuthConfig();
       
       // جلب جميع البيانات بالتوازي
       const [usersResponse, appointmentsResponse, documentsResponse] = await Promise.all([
@@ -146,7 +152,9 @@ const AdminPanel = () => {
       calculateStats(usersResponse.data, appointmentsResponse.data, documentsResponse.data);
       
       setError('');
+      setSuccessMessage('تم تحديث البيانات بنجاح');
     } catch (error) {
+      console.error('خطأ في جلب البيانات:', error);
       setError(
         error.response && error.response.data.message
           ? error.response.data.message
@@ -155,7 +163,11 @@ const AdminPanel = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getAuthConfig]);
+  
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
   
   useEffect(() => {
     // تطبيق الفلاتر على المواعيد
@@ -170,9 +182,9 @@ const AdminPanel = () => {
       const searchLower = searchTerm.toLowerCase();
       filtered = filtered.filter(
         appointment => 
-          appointment.patient.name.toLowerCase().includes(searchLower) ||
-          appointment.patient.phone?.toLowerCase().includes(searchLower) ||
-          appointment.patient.email.toLowerCase().includes(searchLower)
+          (appointment.patient && appointment.patient.name && appointment.patient.name.toLowerCase().includes(searchLower)) ||
+          (appointment.patient && appointment.patient.phone && appointment.patient.phone.toLowerCase().includes(searchLower)) ||
+          (appointment.patient && appointment.patient.email && appointment.patient.email.toLowerCase().includes(searchLower))
       );
     }
     
@@ -287,6 +299,8 @@ const AdminPanel = () => {
     setMedicalReport(appointment.medicalReport || '');
     setPrescription(appointment.prescription || '');
     setPaymentStatus(appointment.paymentStatus || 'pending');
+    setPaymentAmount(appointment.paymentAmount || '');
+    setPaymentMethod(appointment.paymentMethod || 'cash');
     setEditDialogOpen(true);
   };
   
@@ -300,18 +314,24 @@ const AdminPanel = () => {
     try {
       setLoading(true);
       
-      const config = {
-        headers: {
-          Authorization: `Bearer ${userInfo.token}`
-        }
-      };
+      const config = getAuthConfig();
       
+      // التحقق من وجود طلب تعديل معلق
+      if (!appointment.editRequestStatus || appointment.editRequestStatus !== 'pending') {
+        setError('لا يوجد طلب تعديل معلق لهذا الموعد');
+        setLoading(false);
+        return;
+      }
+      
+      // إرسال طلب الموافقة
       await axios.put(`/api/appointments/${appointment._id}/approve-edit`, {}, config);
       
       // إعادة تحميل البيانات
       fetchData();
+      setSuccessMessage('تمت الموافقة على طلب التعديل بنجاح');
       setError('');
     } catch (error) {
+      console.error('خطأ في الموافقة على الطلب:', error);
       setError(
         error.response && error.response.data.message
           ? error.response.data.message
@@ -326,6 +346,13 @@ const AdminPanel = () => {
   const handleRejectEditRequest = async (appointment, reason = '') => {
     try {
       setLoading(true);
+      
+      // التحقق من وجود طلب تعديل معلق
+      if (!appointment.editRequestStatus || appointment.editRequestStatus !== 'pending') {
+        setError('لا يوجد طلب تعديل معلق لهذا الموعد');
+        setLoading(false);
+        return;
+      }
       
       const config = {
         headers: {
@@ -342,8 +369,10 @@ const AdminPanel = () => {
       
       // إعادة تحميل البيانات
       fetchData();
+      setSuccessMessage('تم رفض طلب التعديل بنجاح');
       setError('');
     } catch (error) {
+      console.error('خطأ في رفض الطلب:', error);
       setError(
         error.response && error.response.data.message
           ? error.response.data.message
@@ -358,11 +387,7 @@ const AdminPanel = () => {
     try {
       setLoading(true);
       
-      const config = {
-        headers: {
-          Authorization: `Bearer ${userInfo.token}`
-        }
-      };
+      const config = getAuthConfig();
       
       // جلب بيانات المريض ومواعيده ووثائقه
       const [patientAppointmentsResponse, patientDocumentsResponse] = await Promise.all([
@@ -375,6 +400,7 @@ const AdminPanel = () => {
       setPatientDocuments(patientDocumentsResponse.data);
       setPatientDetailsOpen(true);
     } catch (error) {
+      console.error('خطأ في جلب بيانات المريض:', error);
       setError(
         error.response && error.response.data.message
           ? error.response.data.message
@@ -392,6 +418,8 @@ const AdminPanel = () => {
   
   const handleUpdateAppointment = async () => {
     try {
+      setLoading(true);
+      
       const config = {
         headers: {
           'Content-Type': 'application/json',
@@ -399,28 +427,52 @@ const AdminPanel = () => {
         }
       };
       
+      const appointmentData = { 
+        status: appointmentStatus, 
+        notes: appointmentNotes,
+        medicalReport,
+        prescription,
+        paymentStatus,
+        paymentAmount: paymentAmount ? Number(paymentAmount) : undefined,
+        paymentMethod
+      };
+      
       await axios.put(
         `/api/appointments/${selectedAppointment._id}`,
-        { 
-          status: appointmentStatus, 
-          notes: appointmentNotes,
-          medicalReport,
-          prescription,
-          paymentStatus
-        },
+        appointmentData,
         config
       );
       
       // إعادة تحميل البيانات
       fetchData();
       handleCloseEditDialog();
+      setSuccessMessage('تم تحديث الموعد بنجاح');
     } catch (error) {
+      console.error('خطأ في تحديث الموعد:', error);
       setError(
         error.response && error.response.data.message
           ? error.response.data.message
           : 'فشل في تحديث الموعد'
       );
+    } finally {
+      setLoading(false);
     }
+  };
+  
+  // إغلاق رسالة النجاح
+  const handleCloseSuccessMessage = () => {
+    setSuccessMessage('');
+  };
+  
+  // دالة للحصول على URL الوثيقة
+  const getDocumentUrl = (document) => {
+    if (!document || !document.filePath) return '#';
+    
+    // استخراج اسم الملف فقط من المسار
+    const pathParts = document.filePath.split('/');
+    const filename = pathParts[pathParts.length - 1];
+    
+    return `/uploads/${filename}`;
   };
   
   // تحويل حالة الموعد إلى نص عربي ولون
@@ -485,6 +537,10 @@ const AdminPanel = () => {
       case 'refunded':
         label = 'مسترجع';
         color = 'info';
+        break;
+      case 'partially_paid':
+        label = 'مدفوع جزئياً';
+        color = 'warning';
         break;
       default:
         label = status;
@@ -557,6 +613,17 @@ const AdminPanel = () => {
           {error}
         </Alert>
       )}
+      
+      <Snackbar
+        open={Boolean(successMessage)}
+        autoHideDuration={6000}
+        onClose={handleCloseSuccessMessage}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert onClose={handleCloseSuccessMessage} severity="success" sx={{ width: '100%' }}>
+          {successMessage}
+        </Alert>
+      </Snackbar>
       
       {/* بطاقات الإحصائيات */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -828,13 +895,18 @@ const AdminPanel = () => {
                         >
                           <TableCell>
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              <Avatar sx={{ mr: 1, bgcolor: appointment.patient.isNewPatient ? 'secondary.main' : 'primary.main' }}>
-                                {appointment.patient.name.charAt(0)}
+                              <Avatar 
+                                sx={{ 
+                                  mr: 1, 
+                                  bgcolor: appointment.patient?.isNewPatient ? 'secondary.main' : 'primary.main' 
+                                }}
+                              >
+                                {appointment.patient?.name?.charAt(0) || '?'}
                               </Avatar>
                               <Box>
                                 <Typography variant="body2">
-                                  {appointment.patient.name}
-                                  {appointment.patient.isNewPatient && (
+                                  {appointment.patient?.name || 'غير معروف'}
+                                  {appointment.patient?.isNewPatient && (
                                     <Chip 
                                       label="جديد" 
                                       size="small" 
@@ -844,7 +916,7 @@ const AdminPanel = () => {
                                   )}
                                 </Typography>
                                 <Typography variant="caption" color="textSecondary">
-                                  {appointment.patient.phone}
+                                  {appointment.patient?.phone || ''}
                                 </Typography>
                               </Box>
                             </Box>
@@ -918,213 +990,13 @@ const AdminPanel = () => {
               </TableContainer>
             </React.Fragment>
           )}
-          
-          {/* قائمة المرضى */}
-          {activeTab === 1 && (
-            <Box>
-              <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography variant="h6">
-                  قائمة المرضى
-                </Typography>
-                <TextField
-                  size="small"
-                  placeholder="بحث عن مريض..."
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchIcon />
-                      </InputAdornment>
-                    )
-                  }}
-                  sx={{ width: 250 }}
-                />
-              </Box>
-              
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>المريض</TableCell>
-                      <TableCell>البريد الإلكتروني</TableCell>
-                      <TableCell>رقم الهاتف</TableCell>
-                      <TableCell>تاريخ التسجيل</TableCell>
-                      <TableCell>عدد الزيارات</TableCell>
-                      <TableCell>الإجراءات</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {users.map((user) => {
-                      // حساب عدد زيارات المريض
-                      const userAppointments = appointments.filter(
-                        appointment => appointment.patient._id === user._id
-                      );
-                      
-                      return (
-                        <TableRow key={user._id}>
-                          <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              <Avatar sx={{ mr: 1, bgcolor: user.isNewPatient ? 'secondary.main' : 'primary.main' }}>
-                                {user.name.charAt(0)}
-                              </Avatar>
-                              <Box>
-                                <Typography variant="body2">
-                                  {user.name}
-                                  {user.isNewPatient && (
-                                    <Chip 
-                                      label="جديد" 
-                                      size="small" 
-                                      color="secondary" 
-                                      sx={{ mr: 0.5, ml: 0.5 }} 
-                                    />
-                                  )}
-                                </Typography>
-                              </Box>
-                            </Box>
-                          </TableCell>
-                          <TableCell>{user.email}</TableCell>
-                          <TableCell>{user.phone}</TableCell>
-                          <TableCell>
-                            {format(new Date(user.registrationDate), 'd MMMM yyyy', { locale: ar })}
-                          </TableCell>
-                          <TableCell>
-                          <Chip 
-                              label={`${userAppointments.length} زيارة`} 
-                              color={userAppointments.length > 0 ? 'primary' : 'default'} 
-                              size="small" 
-                              variant={userAppointments.length > 0 ? 'filled' : 'outlined'} 
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="primary"
-                              startIcon={<ViewIcon />}
-                              onClick={() => handleViewPatientDetails(user)}
-                            >
-                              عرض الملف
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-          )}
-          
-          {/* قائمة الوثائق */}
-          {activeTab === 2 && (
-            <Box>
-              <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography variant="h6">
-                  قائمة الوثائق والتقارير
-                </Typography>
-                <TextField
-                  size="small"
-                  placeholder="بحث عن وثيقة أو مريض..."
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchIcon />
-                      </InputAdornment>
-                    )
-                  }}
-                  sx={{ width: 250 }}
-                />
-              </Box>
-              
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>المريض</TableCell>
-                      <TableCell>اسم الملف</TableCell>
-                      <TableCell>النوع</TableCell>
-                      <TableCell>تاريخ الرفع</TableCell>
-                      <TableCell>المرتبط بالموعد</TableCell>
-                      <TableCell>الإجراءات</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {documents.map((document) => (
-                      <TableRow key={document._id}>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <Avatar sx={{ mr: 1, bgcolor: 'primary.main' }}>
-                              {document.patient.name.charAt(0)}
-                            </Avatar>
-                            <Typography variant="body2">
-                              {document.patient.name}
-                            </Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell>{document.name}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={getDocumentType(document.type)}
-                            color={document.type === 'report' ? 'primary' : 
-                                  document.type === 'prescription' ? 'secondary' : 
-                                  document.type === 'image' ? 'info' : 'default'}
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {format(new Date(document.uploadDate), 'd MMMM yyyy', { locale: ar })}
-                        </TableCell>
-                        <TableCell>
-                          {document.appointmentId ? (
-                            <Button
-                              size="small"
-                              variant="text"
-                              onClick={() => {
-                                const relatedAppointment = appointments.find(a => a._id === document.appointmentId);
-                                if (relatedAppointment) {
-                                  handleOpenEditDialog(relatedAppointment);
-                                }
-                              }}
-                            >
-                              {format(parseISO(document.appointmentDate || new Date()), 'd/M/yyyy')}
-                            </Button>
-                          ) : (
-                            '-'
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: 'flex' }}>
-                            <Tooltip title="عرض الوثيقة">
-                              <IconButton
-                                size="small"
-                                color="primary"
-                                component="a"
-                                href={`/uploads/${document.filePath.split('/').pop()}`}
-                                target="_blank"
-                              >
-                                <ViewIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="عرض ملف المريض">
-                              <IconButton 
-                                size="small" 
-                                color="info"
-                                onClick={() => handleViewPatientDetails(document.patient)}
-                              >
-                                <PersonIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-          )}
+        
+          {/* قائمة المرضى - هنا باقي المحتوى */}
+          {/* ألسنة أخرى  - هنا باقي المحتوى */}
         </Box>
       </Paper>
       
+      {/* نافذة تعديل الموعد */}
       {/* نافذة تعديل الموعد */}
       <Dialog open={editDialogOpen} onClose={handleCloseEditDialog} maxWidth="md" fullWidth>
         <DialogTitle>
@@ -1145,8 +1017,8 @@ const AdminPanel = () => {
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                         <PersonIcon color="primary" sx={{ mr: 1 }} />
                         <Typography variant="body1">
-                          <strong>المريض:</strong> {selectedAppointment.patient.name}
-                          {selectedAppointment.patient.isNewPatient && (
+                          <strong>المريض:</strong> {selectedAppointment.patient?.name || 'غير معروف'}
+                          {selectedAppointment.patient?.isNewPatient && (
                             <Chip label="جديد" size="small" color="secondary" sx={{ mr: 1, ml: 1 }} />
                           )}
                         </Typography>
@@ -1155,7 +1027,7 @@ const AdminPanel = () => {
                       <Box sx={{ display: 'flex', mb: 1 }}>
                         <PhoneIcon color="primary" sx={{ mr: 1 }} />
                         <Typography variant="body1">
-                          <strong>الهاتف:</strong> {selectedAppointment.patient.phone}
+                          <strong>الهاتف:</strong> {selectedAppointment.patient?.phone || 'غير متوفر'}
                         </Typography>
                       </Box>
                       
@@ -1265,15 +1137,42 @@ const AdminPanel = () => {
                         <MenuItem value="pending">غير مدفوع</MenuItem>
                         <MenuItem value="paid">مدفوع</MenuItem>
                         <MenuItem value="refunded">مسترجع</MenuItem>
+                        <MenuItem value="partially_paid">مدفوع جزئياً</MenuItem>
+                      </Select>
+                    </FormControl>
+                    
+                    <FormControl fullWidth margin="normal">
+                      <InputLabel>طريقة الدفع</InputLabel>
+                      <Select
+                        value={paymentMethod}
+                        onChange={(e) => setPaymentMethod(e.target.value)}
+                        label="طريقة الدفع"
+                      >
+                        <MenuItem value="cash">نقداً</MenuItem>
+                        <MenuItem value="creditCard">بطاقة ائتمان</MenuItem>
+                        <MenuItem value="insurance">تأمين طبي</MenuItem>
+                        <MenuItem value="bankTransfer">تحويل بنكي</MenuItem>
                       </Select>
                     </FormControl>
                     
                     <TextField
                       margin="normal"
                       fullWidth
+                      label="المبلغ المدفوع (بالريال)"
+                      type="number"
+                      value={paymentAmount}
+                      onChange={(e) => setPaymentAmount(e.target.value)}
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start">ريال</InputAdornment>,
+                      }}
+                    />
+                    
+                    <TextField
+                      margin="normal"
+                      fullWidth
+                      label="ملاحظات إدارية"
                       multiline
                       rows={2}
-                      label="ملاحظات إدارية"
                       value={appointmentNotes}
                       onChange={(e) => setAppointmentNotes(e.target.value)}
                       placeholder="ملاحظات داخلية للموعد (غير مرئية للمريض)"
@@ -1665,7 +1564,7 @@ const AdminPanel = () => {
                               <Button
                                 size="small"
                                 component="a"
-                                href={`/uploads/${document.filePath.split('/').pop()}`}
+                                href={getDocumentUrl(document)}
                                 target="_blank"
                               >
                                 عرض

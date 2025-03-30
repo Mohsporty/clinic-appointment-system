@@ -43,11 +43,12 @@ const DocumentsList = ({ user }) => {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState(null);
   
-  // حالة النموذج
+  // Form state
   const [file, setFile] = useState(null);
   const [documentType, setDocumentType] = useState('');
   const [description, setDescription] = useState('');
@@ -60,44 +61,55 @@ const DocumentsList = ({ user }) => {
     { value: 'other', label: 'وثيقة أخرى', icon: <OtherIcon /> }
   ];
   
-  // تحسين fetchDocuments باستخدام useCallback
+  // Improved fetchDocuments with useCallback
   const fetchDocuments = useCallback(async () => {
     try {
       setLoading(true);
       
+      if (!user || !user.token) {
+        setError('User authentication required');
+        setLoading(false);
+        return;
+      }
+      
       const config = {
         headers: {
-          Authorization: `Bearer ${user?.token}`
+          Authorization: `Bearer ${user.token}`
         }
       };
       
       const { data } = await axios.get('/api/documents', config);
       
-      // ترتيب الوثائق حسب تاريخ الرفع (الأحدث أولاً)
+      // Sort documents by upload date (newest first)
       const sortedDocuments = data.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
       
       setDocuments(sortedDocuments);
       setError('');
     } catch (error) {
+      console.error('Error fetching documents:', error);
       setError(
         error.response && error.response.data.message
           ? error.response.data.message
-          : 'فشل في تحميل الوثائق'
+          : 'Failed to load documents'
       );
     } finally {
       setLoading(false);
     }
-  }, [user]); // إضافة user كتبعية
+  }, [user]); // Add user as dependency
   
   useEffect(() => {
-    fetchDocuments();
-  }, [fetchDocuments]); // إضافة fetchDocuments كتبعية
+    if (user && user.token) {
+      fetchDocuments();
+    }
+  }, [fetchDocuments, user]); // Add fetchDocuments as dependency
   
   const handleOpenUpload = () => {
     setFile(null);
     setDocumentType('');
     setDescription('');
     setUploadOpen(true);
+    setError('');
+    setSuccess('');
   };
   
   const handleCloseUpload = () => {
@@ -107,6 +119,7 @@ const DocumentsList = ({ user }) => {
   const handleOpenDelete = (document) => {
     setSelectedDocument(document);
     setDeleteOpen(true);
+    setError('');
   };
   
   const handleCloseDelete = () => {
@@ -122,12 +135,13 @@ const DocumentsList = ({ user }) => {
     e.preventDefault();
     
     if (!file || !documentType) {
-      setError('يرجى اختيار ملف ونوع الوثيقة');
+      setError('Please select a file and document type');
       return;
     }
     
     try {
       setUploadLoading(true);
+      setError('');
       
       const formData = new FormData();
       formData.append('file', file);
@@ -143,14 +157,16 @@ const DocumentsList = ({ user }) => {
       
       await axios.post('/api/documents', formData, config);
       
-      // إعادة تحميل الوثائق
+      // Reload documents
       fetchDocuments();
+      setSuccess('Document uploaded successfully');
       handleCloseUpload();
     } catch (error) {
+      console.error('Error uploading document:', error);
       setError(
         error.response && error.response.data.message
           ? error.response.data.message
-          : 'فشل في رفع الوثيقة'
+          : 'Failed to upload document'
       );
     } finally {
       setUploadLoading(false);
@@ -159,6 +175,9 @@ const DocumentsList = ({ user }) => {
   
   const handleDeleteDocument = async () => {
     try {
+      setLoading(true);
+      setError('');
+      
       const config = {
         headers: {
           Authorization: `Bearer ${user.token}`
@@ -167,19 +186,23 @@ const DocumentsList = ({ user }) => {
       
       await axios.delete(`/api/documents/${selectedDocument._id}`, config);
       
-      // إعادة تحميل الوثائق
+      // Reload documents
       fetchDocuments();
+      setSuccess('Document deleted successfully');
       handleCloseDelete();
     } catch (error) {
+      console.error('Error deleting document:', error);
       setError(
         error.response && error.response.data.message
           ? error.response.data.message
-          : 'فشل في حذف الوثيقة'
+          : 'Failed to delete document'
       );
+    } finally {
+      setLoading(false);
     }
   };
   
-  // الحصول على أيقونة حسب نوع الوثيقة
+  // Get icon based on document type
   const getDocumentIcon = (type) => {
     switch (type) {
       case 'report':
@@ -194,13 +217,24 @@ const DocumentsList = ({ user }) => {
     }
   };
   
-  // الحصول على اسم نوع الوثيقة بالعربية
+  // Get document type name in Arabic
   const getDocumentTypeName = (type) => {
     const docType = documentTypes.find(d => d.value === type);
     return docType ? docType.label : 'وثيقة';
   };
   
-  if (loading) {
+  // Fixed document URL generation
+  const getDocumentUrl = (document) => {
+    if (!document || !document.filePath) return '#';
+    
+    // Extract just the filename from the path
+    const pathParts = document.filePath.split('/');
+    const filename = pathParts[pathParts.length - 1];
+    
+    return `/uploads/${filename}`;
+  };
+  
+  if (loading && documents.length === 0) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
         <CircularProgress />
@@ -228,6 +262,12 @@ const DocumentsList = ({ user }) => {
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
+        </Alert>
+      )}
+      
+      {success && (
+        <Alert severity="success" sx={{ mb: 3 }}>
+          {success}
         </Alert>
       )}
       
@@ -273,7 +313,7 @@ const DocumentsList = ({ user }) => {
                     size="small" 
                     color="primary"
                     component="a"
-                    href={`/uploads/${document.filePath.split('/').pop()}`}
+                    href={getDocumentUrl(document)}
                     target="_blank"
                   >
                     عرض
@@ -293,13 +333,19 @@ const DocumentsList = ({ user }) => {
         </Grid>
       )}
       
-      {/* نافذة رفع وثيقة جديدة */}
+      {/* Upload new document dialog */}
       <Dialog open={uploadOpen} onClose={handleCloseUpload} maxWidth="sm" fullWidth>
         <DialogTitle>
           رفع وثيقة جديدة
         </DialogTitle>
         
         <DialogContent>
+          {error && (
+            <Alert severity="error" sx={{ mt: 2, mb: 1 }}>
+              {error}
+            </Alert>
+          )}
+          
           <Box component="form" sx={{ mt: 1 }}>
             <Button
               variant="outlined"
@@ -371,7 +417,7 @@ const DocumentsList = ({ user }) => {
         </DialogActions>
       </Dialog>
       
-      {/* نافذة تأكيد الحذف */}
+      {/* Confirm delete dialog */}
       <Dialog open={deleteOpen} onClose={handleCloseDelete}>
         <DialogTitle>تأكيد حذف الوثيقة</DialogTitle>
         <DialogContent>

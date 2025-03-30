@@ -1,6 +1,6 @@
 // client/src/components/auth/Login.js
 import React, { useState, useEffect } from 'react';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Container, 
   Box, 
@@ -25,19 +25,35 @@ const Login = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const navigate = useNavigate();
-  const { login, isAuthenticated, user } = useAppContext();
+  const location = useLocation();
+  const { login, isAuthenticated, user, loading } = useAppContext();
+  
+  // استخراج معلمات URL
+  const urlParams = new URLSearchParams(location.search);
+  const redirectPath = urlParams.get('redirect');
+  const expired = urlParams.get('expired');
   
   // إعادة التوجيه إذا كان المستخدم مسجل الدخول بالفعل
   useEffect(() => {
-    if (isAuthenticated) {
-      // توجيه المستخدم حسب دوره
-      if (user && user.role === 'admin') {
+    if (isAuthenticated && user) {
+      console.log('المستخدم مسجل الدخول بالفعل، إعادة التوجيه...');
+      // توجيه المستخدم حسب دوره أو إلى الصفحة المطلوبة
+      if (redirectPath) {
+        navigate(redirectPath);
+      } else if (user.role === 'admin') {
         navigate('/admin');
       } else {
         navigate('/dashboard');
       }
     }
-  }, [isAuthenticated, user, navigate]);
+  }, [isAuthenticated, user, navigate, redirectPath]);
+  
+  // إظهار رسالة خطأ إذا انتهت صلاحية الجلسة
+  useEffect(() => {
+    if (expired === 'true') {
+      setError('انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى.');
+    }
+  }, [expired]);
   
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -52,22 +68,38 @@ const Login = () => {
     setError('');
     
     try {
+      console.log('محاولة تسجيل الدخول...'); // للتشخيص
+      
       // استخدام وظيفة login من Context
       const result = await login(email, password);
+      console.log('نتيجة تسجيل الدخول:', result); // للتشخيص
       
       if (!result.success) {
         setError(result.message);
       } else {
-        // توجيه المستخدم حسب دوره باستخدام مسار خاص بالتوجيه
-        navigate('/role-redirect');
+        // توجيه المستخدم حسب دوره أو إلى الصفحة المطلوبة
+        if (redirectPath) {
+          navigate(redirectPath);
+        } else {
+          navigate('/role-redirect');
+        }
       }
     } catch (err) {
+      console.error('خطأ غير متوقع في تسجيل الدخول:', err);
       setError('حدث خطأ أثناء تسجيل الدخول. يرجى المحاولة مرة أخرى.');
-      console.error(err);
     } finally {
       setIsSubmitting(false);
     }
   };
+  
+  // إذا كانت حالة التحميل الأولية قيد التنفيذ
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
   
   return (
     <div className="centered-container">
@@ -100,6 +132,7 @@ const Login = () => {
             onChange={(e) => setEmail(e.target.value)}
             sx={{ mb: 2 }}
             variant="outlined"
+            dir="rtl"
           />
           
           <TextField
@@ -115,6 +148,7 @@ const Login = () => {
             onChange={(e) => setPassword(e.target.value)}
             sx={{ mb: 3 }}
             variant="outlined"
+            dir="rtl"
           />
           
           <Button

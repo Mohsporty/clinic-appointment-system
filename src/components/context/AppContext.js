@@ -1,22 +1,22 @@
 // client/src/components/context/AppContext.js
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { jwtDecode } from 'jwt-decode'; // إضافة مكتبة jwt-decode للتحقق من صلاحية التوكن
+import { jwtDecode } from 'jwt-decode';
 
-// إنشاء Context
+// Create Context
 const AppContext = createContext(null);
 
-// إنشاء كلاس لإدارة الجلسة في localStorage
+// Session Manager Class with improved token handling
 class SessionManager {
   static setUserInfo(userData) {
-    // تخزين التوكن بطريقة أكثر أمانًا مع وقت انتهاء الصلاحية
+    // Store token with expiry time
     const secureUserData = {
       ...userData,
-      tokenExpiry: Date.now() + (24 * 60 * 60 * 1000) // 24 ساعة
+      tokenExpiry: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
     };
     localStorage.setItem('userInfo', JSON.stringify(secureUserData));
     
-    // تعيين توكن الـ JWT في رأس الطلبات
+    // Set JWT token in request headers
     axios.defaults.headers.common['Authorization'] = `Bearer ${userData.token}`;
   }
   
@@ -27,15 +27,14 @@ class SessionManager {
     try {
       const userData = JSON.parse(userInfo);
       
-      // التحقق من انتهاء صلاحية التوكن
+      // Check if token is expired
       if (userData.tokenExpiry && userData.tokenExpiry < Date.now()) {
-        // التوكن منتهي الصلاحية، قم بإزالة بيانات المستخدم
         this.clearUserInfo();
         return null;
       }
       
       if (userData.token) {
-        // تعيين توكن الـ JWT في رأس الطلبات
+        // Set JWT token in request headers
         axios.defaults.headers.common['Authorization'] = `Bearer ${userData.token}`;
       }
       
@@ -56,13 +55,27 @@ class SessionManager {
     
     try {
       const decoded = jwtDecode(token);
-      // التحقق مما إذا كان التوكن منتهي الصلاحية
+      // Check if token is expired
       return decoded.exp * 1000 > Date.now();
     } catch (error) {
       return false;
     }
   }
 }
+
+// Global axios response interceptor for handling 401 errors
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Handle 401 Unauthorized errors globally
+    if (error.response && error.response.status === 401) {
+      // Clear session and redirect to login
+      SessionManager.clearUserInfo();
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Provider Component
 export const AppContextProvider = ({ children }) => {
@@ -71,25 +84,25 @@ export const AppContextProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // التحقق من حالة تسجيل الدخول عند تحميل التطبيق
+  // Check authentication status on load
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const userData = SessionManager.getUserInfo();
         
         if (userData && userData.token) {
-          // التحقق من صلاحية التوكن
+          // Verify token validity
           if (SessionManager.isTokenValid(userData.token)) {
-            // تأكد من وجود قيمة للـ role
+            // Set default role if not provided
             const userWithRole = {
               ...userData,
-              role: userData.role || 'user' // تعيين 'user' كقيمة افتراضية
+              role: userData.role || 'user'
             };
             
             setUser(userWithRole);
             setIsAuthenticated(true);
             
-            // التحقق من صلاحية التوكن مع الخادم
+            // Verify token with server
             try {
               const config = {
                 headers: {
@@ -98,31 +111,31 @@ export const AppContextProvider = ({ children }) => {
               };
               
               const response = await axios.get('/api/users/profile', config);
-              // تحديث المعلومات من الخادم إذا لزم الأمر
+              // Update information from server if needed
               if (response.data) {
                 const updatedUserData = {
                   ...userWithRole,
                   ...response.data,
-                  token: userData.token // الحفاظ على التوكن الأصلي
+                  token: userData.token // Keep original token
                 };
                 
                 setUser(updatedUserData);
                 SessionManager.setUserInfo(updatedUserData);
               }
             } catch (profileError) {
-              // في حالة فشل التحقق من الملف الشخصي، نفترض أن التوكن غير صالح
-              console.warn('فشل التحقق من الملف الشخصي، تسجيل الخروج تلقائيًا:', profileError);
+              // On profile check failure, assume token is invalid
+              console.warn('Profile check failed, logging out automatically:', profileError);
               logout();
             }
           } else {
-            // التوكن منتهي الصلاحية، تسجيل الخروج
+            // Token expired, log out
             logout();
           }
         }
       } catch (error) {
-        console.error('خطأ في التحقق من المصادقة:', error);
+        console.error('Authentication check error:', error);
         SessionManager.clearUserInfo();
-        setError('حدث خطأ أثناء التحقق من تسجيل الدخول');
+        setError('Error checking login status');
       } finally {
         setLoading(false);
       }
@@ -131,7 +144,7 @@ export const AppContextProvider = ({ children }) => {
     checkAuth();
   }, []);
 
-  // تسجيل الدخول
+  // Login function
   const login = async (email, password) => {
     setLoading(true);
     try {
@@ -139,37 +152,38 @@ export const AppContextProvider = ({ children }) => {
       
       const { data } = await axios.post('/api/users/login', { email, password });
       
-      // تخزين بيانات المستخدم بطريقة آمنة
+      // Store user data securely
       SessionManager.setUserInfo(data);
       
-      // تأكد من تعيين دور المستخدم
+      // Ensure role is set
       const userWithRole = {
         ...data,
-        role: data.role || 'user' // التأكد من وجود قيمة افتراضية
+        role: data.role || 'user'
       };
       
       setUser(userWithRole);
       setIsAuthenticated(true);
       return { success: true, role: userWithRole.role };
     } catch (error) {
-      setError(error.response?.data?.message || 'فشل تسجيل الدخول');
+      const errorMessage = error.response?.data?.message || 'Login failed';
+      setError(errorMessage);
       return { 
         success: false, 
-        message: error.response?.data?.message || 'فشل تسجيل الدخول' 
+        message: errorMessage
       };
     } finally {
       setLoading(false);
     }
   };
 
-  // تسجيل الخروج
+  // Logout function
   const logout = useCallback(() => {
     SessionManager.clearUserInfo();
     setUser(null);
     setIsAuthenticated(false);
   }, []);
 
-  // التسجيل
+  // Register function
   const register = async (name, email, password, phone) => {
     setLoading(true);
     try {
@@ -179,30 +193,31 @@ export const AppContextProvider = ({ children }) => {
         name, email, password, phone
       });
       
-      // تخزين بيانات المستخدم بطريقة آمنة
+      // Store user data securely
       SessionManager.setUserInfo(data);
       
-      // تأكد من تعيين دور المستخدم
+      // Ensure role is set
       const userWithRole = {
         ...data,
-        role: data.role || 'user' // التأكد من وجود قيمة افتراضية
+        role: data.role || 'user'
       };
       
       setUser(userWithRole);
       setIsAuthenticated(true);
       return { success: true, role: userWithRole.role };
     } catch (error) {
-      setError(error.response?.data?.message || 'فشل التسجيل');
+      const errorMessage = error.response?.data?.message || 'Registration failed';
+      setError(errorMessage);
       return { 
         success: false, 
-        message: error.response?.data?.message || 'فشل التسجيل' 
+        message: errorMessage 
       };
     } finally {
       setLoading(false);
     }
   };
 
-  // تحديث الملف الشخصي
+  // Update profile function
   const updateProfile = async (userData) => {
     setLoading(true);
     try {
@@ -217,7 +232,7 @@ export const AppContextProvider = ({ children }) => {
       
       const { data } = await axios.put('/api/users/profile', userData, config);
       
-      // تحديث بيانات المستخدم مع الاحتفاظ بالتوكن
+      // Update user data while keeping the token
       const updatedUserData = {
         ...data,
         token: user.token
@@ -228,28 +243,29 @@ export const AppContextProvider = ({ children }) => {
       
       return { success: true, data: updatedUserData };
     } catch (error) {
-      setError(error.response?.data?.message || 'فشل تحديث الملف الشخصي');
+      const errorMessage = error.response?.data?.message || 'Profile update failed';
+      setError(errorMessage);
       return { 
         success: false, 
-        message: error.response?.data?.message || 'فشل تحديث الملف الشخصي' 
+        message: errorMessage
       };
     } finally {
       setLoading(false);
     }
   };
 
-  // التحقق من صلاحية التوكن
+  // Verify token function
   const verifyToken = useCallback(async () => {
     if (!user || !user.token) return false;
     
     try {
-      // التحقق من صلاحية التوكن المحلية أولاً
+      // Check local token validity first
       if (!SessionManager.isTokenValid(user.token)) {
         logout();
         return false;
       }
       
-      // التحقق من الخادم
+      // Verify with server
       const config = {
         headers: {
           Authorization: `Bearer ${user.token}`
@@ -259,13 +275,13 @@ export const AppContextProvider = ({ children }) => {
       await axios.get('/api/users/verify-token', config);
       return true;
     } catch (error) {
-      // التوكن غير صالح، تسجيل الخروج
+      // Token invalid, log out
       logout();
       return false;
     }
   }, [user, logout]);
 
-  // القيم التي ستوفرها الـ Context
+  // Context values to provide
   const contextValue = {
     user,
     isAuthenticated,
@@ -285,12 +301,12 @@ export const AppContextProvider = ({ children }) => {
   );
 };
 
-// Hook مخصص لاستخدام Context
+// Custom hook for using Context
 export const useAppContext = () => {
   const context = useContext(AppContext);
   
   if (!context) {
-    throw new Error('يجب استخدام useAppContext داخل AppContextProvider');
+    throw new Error('useAppContext must be used within AppContextProvider');
   }
   
   return context;
