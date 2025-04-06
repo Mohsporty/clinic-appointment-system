@@ -306,6 +306,219 @@ const getPatientAppointments = async (req, res) => {
   }
 };
 
+// طلب تعديل موعد
+const requestAppointmentEdit = async (req, res) => {
+  try {
+    const { newDate, newTime, reason } = req.body;
+    const appointmentId = req.params.id;
+
+    // التحقق من صحة البيانات
+    if (!newDate || !newTime || !reason) {
+      return res.status(400).json({ 
+        message: 'يرجى تقديم التاريخ والوقت الجديد وسبب التعديل' 
+      });
+    }
+
+    const appointment = await Appointment.findById(appointmentId);
+    
+    if (!appointment) {
+      return res.status(404).json({ message: 'الموعد غير موجود' });
+    }
+    
+    // التحقق من أن الموعد للمستخدم الحالي
+    if (appointment.patient.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'غير مصرح لك بتقديم طلب تعديل لهذا الموعد' });
+    }
+    
+    // التحقق من أن الموعد لم يتم إلغاؤه
+    if (appointment.status === 'cancelled') {
+      return res.status(400).json({ message: 'لا يمكن تعديل موعد تم إلغاؤه' });
+    }
+    
+    // التحقق من أن الموعد ليس في خلال 24 ساعة
+    const appointmentDateTime = new Date(appointment.date);
+    appointmentDateTime.setHours(
+      parseInt(appointment.time.split(':')[0]),
+      parseInt(appointment.time.split(':')[1])
+    );
+    
+    const now = new Date();
+    const hoursUntilAppointment = (appointmentDateTime - now) / (1000 * 60 * 60);
+    
+    if (hoursUntilAppointment < 24) {
+      return res.status(400).json({ 
+        message: 'لا يمكن تعديل المواعيد قبل 24 ساعة من الموعد المحدد' 
+      });
+    }
+    
+    // إنشاء طلب التعديل
+    appointment.editRequest = {
+      newDate: new Date(newDate),
+      newTime: newTime,
+      reason: reason,
+      requestedAt: new Date()
+    };
+    
+    appointment.editRequestStatus = 'pending';
+    
+    const updatedAppointment = await appointment.save();
+    
+    // إرسال رسالة تأكيد
+    try {
+      await sendSMS(
+        req.user.phone,
+        `مرحبًا ${req.user.name}، تم استلام طلب تعديل موعدك. سيتم مراجعته والرد عليك قريبًا.`
+      );
+    } catch (smsError) {
+      console.error('فشل في إرسال رسالة تأكيد طلب التعديل:', smsError);
+    }
+    
+    res.json({
+      message: 'تم إرسال طلب التعديل بنجاح وسيتم مراجعته',
+      appointment: updatedAppointment
+    });
+    
+  } catch (error) {
+    console.error('خطأ في طلب تعديل الموعد:', error);
+    res.status(500).json({ 
+      message: 'حدث خطأ أثناء معالجة طلب التعديل',
+      error: error.message
+    });
+  }
+};
+
+// الموافقة على طلب تعديل الموعد (للمدير فقط)
+const approveEditRequest = async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+    
+    const appointment = await Appointment.findById(appointmentId);
+    
+    if (!appointment) {
+      return res.status(404).json({ message: 'الموعد غير موجود' });
+    }
+    
+    // التحقق من وجود طلب تعديل معلق
+    if (!appointment.editRequest || appointment.editRequestStatus !== 'pending') {
+      return res.status(400).json({ message: 'لا يوجد طلب تعديل معلق لهذا الموعد' });
+    }
+    
+    // التحقق من عدم وجود موعد آخر في نفس الوقت الجديد
+    const existingAppointment = await Appointment.findOne({
+      _id: { $ne: appointmentId },
+      date: new Date(appointment.editRequest.newDate),
+      time: appointment.editRequest.newTime,
+      status: { $ne: 'cancelled' }
+    });
+
+    if (existingAppointment) {
+      // تحديث حالة طلب التعديل إلى مرفوض
+      appointment.editRequestStatus = 'rejected';
+      await appointment.save();
+      
+      return res.status(400).json({ 
+        message: 'التاريخ والوقت الجديد غير متاح، محجوز بالفعل',
+        appointment
+      });
+    }
+    
+    // تحديث الموعد بالمعلومات الجديدة
+    appointment.date = appointment.editRequest.newDate;
+    appointment.time = appointment.editRequest.newTime;
+    appointment.editRequestStatus = 'approved';
+    
+    const updatedAppointment = await appointment.save();
+    
+    // جلب معلومات المريض لإرسال رسالة نصية
+    const patient = await User.findById(appointment.patient);
+    
+    // إرسال إشعار للمريض
+    try {
+      await sendSMS(
+        patient.phone,
+        `مرحبًا ${patient.name}، تمت الموافقة على طلب تعديل موعدك. الموعد الجديد: ${appointment.time} يوم ${new Date(appointment.date).toLocaleDateString('ar-SA')}.`
+      );
+    } catch (smsError) {
+      console.error('فشل في إرسال رسالة الموافقة على طلب التعديل:', smsError);
+    }
+    
+    res.json({
+      message: 'تمت الموافقة على طلب التعديل وتحديث الموعد',
+      appointment: updatedAppointment
+    });
+    
+  } catch (error) {
+    console.error('خطأ في الموافقة على طلب التعديل:', error);
+    res.status(500).json({ 
+      message: 'حدث خطأ أثناء معالجة الموافقة على طلب التعديل',
+      error: error.message
+    });
+  }
+};
+
+// رفض طلب تعديل الموعد (للمدير فقط)
+const rejectEditRequest = async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+    const { rejectReason } = req.body; // سبب الرفض اختياري
+    
+    const appointment = await Appointment.findById(appointmentId);
+    
+    if (!appointment) {
+      return res.status(404).json({ message: 'الموعد غير موجود' });
+    }
+    
+    // التحقق من وجود طلب تعديل معلق
+    if (!appointment.editRequest || appointment.editRequestStatus !== 'pending') {
+      return res.status(400).json({ message: 'لا يوجد طلب تعديل معلق لهذا الموعد' });
+    }
+    
+    // تحديث حالة طلب التعديل إلى مرفوض
+    appointment.editRequestStatus = 'rejected';
+    
+    // إضافة سبب الرفض إلى الملاحظات إذا تم تقديمه
+    if (rejectReason) {
+      const noteAddition = `طلب التعديل مرفوض: ${rejectReason}`;
+      appointment.notes = appointment.notes 
+        ? `${appointment.notes}\n${noteAddition}` 
+        : noteAddition;
+    }
+    
+    const updatedAppointment = await appointment.save();
+    
+    // جلب معلومات المريض لإرسال رسالة نصية
+    const patient = await User.findById(appointment.patient);
+    
+    // إرسال إشعار للمريض
+    try {
+      let message = `مرحبًا ${patient.name}، تم رفض طلب تعديل موعدك.`;
+      
+      if (rejectReason) {
+        message += ` السبب: ${rejectReason}`;
+      }
+      
+      message += ` يرجى الاتصال بالعيادة لمزيد من المعلومات.`;
+      
+      await sendSMS(patient.phone, message);
+    } catch (smsError) {
+      console.error('فشل في إرسال رسالة رفض طلب التعديل:', smsError);
+    }
+    
+    res.json({
+      message: 'تم رفض طلب التعديل',
+      appointment: updatedAppointment
+    });
+    
+  } catch (error) {
+    console.error('خطأ في رفض طلب التعديل:', error);
+    res.status(500).json({ 
+      message: 'حدث خطأ أثناء معالجة رفض طلب التعديل',
+      error: error.message
+    });
+  }
+};
+
+// تصدير جميع الدوال
 module.exports = {
   createAppointment,
   getUserAppointments,
@@ -314,5 +527,8 @@ module.exports = {
   getAppointmentById,
   updateAppointment,
   cancelAppointment,
-  getPatientAppointments
+  getPatientAppointments,
+  requestAppointmentEdit,
+  approveEditRequest,
+  rejectEditRequest
 };

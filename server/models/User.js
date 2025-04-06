@@ -43,22 +43,34 @@ const userSchema = mongoose.Schema(
 
 // طريقة لمقارنة كلمة المرور المدخلة مع كلمة المرور المشفرة في قاعدة البيانات
 userSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  try {
+    const isMatch = await bcrypt.compare(enteredPassword, this.password);
+    return isMatch;
+  } catch (error) {
+    console.error('خطأ في مقارنة كلمة المرور:', error);
+    return false;
+  }
 };
 
 // إضافة دالة comparePassword لضمان التوافقية مع الكود القديم
 userSchema.methods.comparePassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  return await this.matchPassword(enteredPassword);
 };
 
 // تشفير كلمة المرور قبل الحفظ
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
-    next();
+    return next();
   }
 
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    console.error('خطأ في تشفير كلمة المرور:', error);
+    next(error);
+  }
 });
 
 const User = mongoose.model('User', userSchema);
