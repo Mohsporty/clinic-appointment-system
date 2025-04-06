@@ -6,15 +6,10 @@ const fs = require('fs');
 const mongoose = require('mongoose');
 const morgan = require('morgan');
 const rfs = require('rotating-file-stream');
+const cors = require('cors');
 
 // تحميل متغيرات البيئة
 dotenv.config();
-
-// استيراد الوسائط middleware
-const configureSecurityMiddleware = require('./middleware/securityMiddleware');
-//const { generalLimiter } = require('./middleware/authMiddleware');
-const { protect, admin, ownerOrAdmin, verifyTokenMiddleware } = require('./middleware/authMiddleware');
-
 
 // استيراد المسارات
 const userRoutes = require('./routes/userRoutes');
@@ -26,40 +21,10 @@ const settingsRoutes = require('./routes/settingsRoutes');
 // إنشاء التطبيق Express
 const app = express();
 
-// إضافة معالج لتسجيل طلبات HTTP للتشخيص
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url} - ${new Date().toISOString()}`);
-  next();
-});
-
-// إعداد مجلد السجلات
-const logDirectory = path.join(__dirname, 'logs');
-if (!fs.existsSync(logDirectory)) {
-  fs.mkdirSync(logDirectory, { recursive: true });
-}
-
-// إنشاء دفق دوار للسجلات
-const accessLogStream = rfs.createStream('access.log', {
-  interval: '1d', // دوران يومي
-  path: logDirectory
-});
-
-// إعداد التسجيل
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan('dev')); // تسجيل مفصل في بيئة التطوير
-} else {
-  app.use(morgan('combined', { stream: accessLogStream })); // تسجيل مختصر في الإنتاج
-}
-
-// تطبيق الوسائط middleware للأمان
-configureSecurityMiddleware(app);
-
-// تفعيل تحليل JSON مع زيادة الحد الأقصى
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: false, limit: '10mb' }));
-
-// تطبيق مُحدد معدل عام
-//app.use(generalLimiter);
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 // إنشاء مجلد التحميلات إذا لم يكن موجوداً
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -78,24 +43,8 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
 
-// إعداد مجلد التحميل كمجلد ثابت مع حماية إضافية
-app.use('/uploads', (req, res, next) => {
-  const filePath = req.path;
-  
-  // التحقق من محاولات الخروج من المجلد
-  if (filePath.includes('..') || filePath.includes('%2e%2e')) {
-    return res.status(403).json({ message: 'غير مسموح بهذا المسار' });
-  }
-  
-  console.log('طلب ملف:', filePath);
-  next();
-}, express.static(path.join(__dirname, '/uploads'), {
-  setHeaders: (res) => {
-    // تعيين رؤوس أمان للملفات
-    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; script-src 'none'");
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-  }
-}));
+// إعداد مجلد التحميل كمجلد ثابت
+app.use('/uploads', express.static(path.join(__dirname, '/uploads')));
 
 // إعداد المسار الافتراضي لبيئة الإنتاج
 if (process.env.NODE_ENV === 'production') {
@@ -110,16 +59,8 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// وسيط للتعامل مع المسارات غير الموجودة
-app.use((req, res) => {
-  console.log('404 - المسار غير موجود:', req.originalUrl);
-  res.status(404).json({ message: 'المسار غير موجود' });
-});
-
 // التعامل مع الأخطاء
 app.use((err, req, res, next) => {
-  console.error('خطأ في الخادم:', err.stack);
-  
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
   
   res.status(statusCode).json({
